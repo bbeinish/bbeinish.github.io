@@ -1,0 +1,124 @@
+---
+title: "finalProject"
+author: "Benny Beinish"
+date: "5/19/2019"
+output: html_document
+---
+
+In this tutorial we will be exploring relationships between how much college football teams spend and earn, and how well they perform. This tutorial will teach you how to use R to scrape and refine data, explore it statistically and use some visual components, and use machine learning to find out more about it. 
+
+In the setup step I am going to import libraries that will help R and RStudio perform the commands I give it. Tidyverse is a key library because it allows users to create pipelines which connect data and commands together by typing "%>%".
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rvest)
+library(tidyverse)
+library(lubridate)
+library(stringr)
+```
+
+Here I will scrape a database of all NCAA Division 1 Bowl Chapionship Series football teams, their records, and other stats about them.
+
+```{r scrape standings}
+url <- "https://www.sports-reference.com/cfb/years/2017-standings.html"
+
+standings <- url %>%
+  read_html() %>%
+  html_nodes("#standings") %>%
+  html_table()
+
+standings <- standings[[1]]
+
+names(standings) <- c("Rank", "School", "Conf", "W", "L", "Pct", "ConfW", "ConfL", "ConfPct", "OffPPG", "DefPPG", "SRS", "SOS", "AP", "r1", "r2", "r3")
+standings <- standings %>% select(-r1, -r2, -r3)
+standings <- standings %>% filter(Rank >= 0)
+standings <- standings %>% filter(Rank != "Rk")
+```
+
+I started by saving the url for the database as "url". I then read the HTML. Because the standings I wanted were in a class called standings I used the command html_nodes("#standings") to read them and identify them withing read_html(). The # marks class. I renamed the columns to make them easier for me to read and work with. I then used some pipeline commands to get ride of unnecessary data and rows that were not needed.
+
+
+Next I will scrape and clean up info about the amount of money that college football teams spend and bring in. 
+
+```{r scrape money}
+url2 <- "https://sports.usatoday.com/ncaa/finances/"
+profits <- url2 %>%
+  read_html() %>%
+  html_nodes("table") %>%
+  html_table()
+profits <- profits[[1]]
+
+names(profits) <- c("Rank", "School", "Conf", "Revenue", "Expenses", "r1", "r2")
+profits <- profits %>% select(-r1, -r2)
+```
+
+As before, I removed some unneeded columns.
+
+Next I am going to change some of the names of teams from the second dataset to what the teams are more traditionally called.
+
+```{r change names}
+profits[profits=="Central Florida"] <- "UCF"
+profits[profits=="Middle Tennessee"] <- "Middle Tennessee State"
+profits[profits=="Alabama at Birmingham"] <- "UAB"
+profits[profits=="Texas-San Antonio"] <- "UTSA"
+profits[profits=="Texas-El Paso"] <- "UTEP"
+profits[profits=="Miami (Ohio)"] <- "Miami (OH)"
+profits[profits=="Bowling Green"] <- "Bowling Green State"
+```
+
+Now I will perform a join. I am going to do a left join from the standings dataframe onto the finances dataframe. This means it will preserve the rows in the left (standings) dataframe. Because the finances dataframe contains info for division 2 schools, that information will not be transferred over. The table with the results of the merge will be called "dat", short for data.
+
+```{r merge}
+dat <- standings %>%
+  left_join(profits, by="School")
+```
+
+I will now tidy dat. The first thing I am going to be do is remove all of the schools that are private. This has to be done because private schools do not publish financial info about their athletic programs. I will do that by removing any school that didn't have data merge over from the profits dataframe. I will then clean up dat a little bit.
+
+```{r tidy dat}
+dat <- dat %>% filter(!is.na(Rank.y))
+dat <- dat %>% select(-Conf.y, -Rank.y)
+dat$Revenue <- as.numeric(gsub('\\$|,', '', dat$Revenue))
+dat$Expenses <- as.numeric(gsub('\\$|,', '', dat$Expenses))
+```
+
+Now I will use the mutate command to add another column to the dataframe. This column will be the profit, which is revenue - expenses. After that I am going to convert everything in the dataframe to the correct type of data.
+
+```{r add profit}
+dat <-  mutate(dat, "Profit" = Revenue - Expenses)
+dat <- type_convert(dat)
+```
+
+#####################################################################################
+Now I can begin the exploratory data analysis part of this tutorial. 
+
+I will show you how to make some graphs in order to look at the data in different ways. To make the graphs I will use ggplot.
+
+The first graph plots win percent against profit, a correlation here would indicate that schools that win more bring in more money compared to what they spend. The second graph does something very similar by plotting win percent against revenue. This is a better indicator of seeing whether having a winning team brings in more money.
+
+```{r plot graphs}
+dat %>% ggplot(mapping=aes(y=Pct, x=Profit)) +
+  geom_point() + 
+  geom_smooth(method=lm)
+dat %>% ggplot(mapping=aes(y=Pct, x=Revenue)) +
+  geom_point() +
+  geom_smooth(method = lm)
+```
+
+At a glance there does not seem to be much correlation in either graph, but I will go more in depth on that later.
+
+The third graph will plot win percent against expenses. A high positive correlation here would suggest that schools that spend more money on their football programs get more wins on the field. geom_smooth() fits a line of minimum residual sum of squares in using linear regression.
+
+```{r plot}
+dat %>% ggplot(mapping=aes(y=Pct, x=Expenses)) +
+  geom_point() + 
+  geom_smooth(method=lm)
+```
+
+Again, it's hard to see if there is a correlation just by looking at this.
+
+#####################################################################################
+I will now begin talking about analysis and machine learning.
+
+
+
